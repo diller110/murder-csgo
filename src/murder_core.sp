@@ -15,7 +15,6 @@ int 	RagdollPlayer[MAXPLAYERS+1],
 		MinPlayersToPlaying,
 		sizeArray_Names = 0,
 		sizeArray_Models = 0,
-		sizeArray_Sounds = 0,
 		iOldButtons[MAXPLAYERS+1],
 		m_flSimulationTime = -1,
 		m_flProgressBarStartTime = -1,
@@ -37,8 +36,9 @@ bool 	g_InUse[MAXPLAYERS+1],
 		g_InAttack1[MAXPLAYERS+1],
 		g_InReload[MAXPLAYERS+1];
 Handle 	CDTimer_Voice[MAXPLAYERS+1];
+ConVar cvChangeNicknames = null;
 
-public Plugin:myinfo = 
+public Plugin myinfo = 
 {
 	name 		= "Murder | Ядро плагина",
 	author 		= "Rustgame",
@@ -47,6 +47,8 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
+	cvChangeNicknames = CreateConVar("sm_murder_changenicknames", "1", "Change player nicknames");
+	
 	LoadTranslations("murder.phrases");
 
 	PrintToServer("[ Murder ][ Core ] StartPlugin");
@@ -126,7 +128,7 @@ public Action Stuck(iClient, Args)
 	int aim = GetClientAimTarget(iClient, false);
 	if (aim > MaxClients)
 	{
-		char 	class[128];
+		char class[128];
 		GetEntityClassname(aim, class, sizeof(class));
 		
 	}
@@ -135,9 +137,9 @@ public void OnThinkPost(entity)
 {
 	if (entity >=0)
 	{
-		decl isAlive[65];
+		static int isAlive[MAXPLAYERS+1];
     
-		GetEntDataArray(entity, g_iIsAliveOffset, isAlive, 65);
+		GetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
 		for (new i = 1; i <= MaxClients; ++i)
 		{
 			if (IsValidClient(i))
@@ -145,11 +147,18 @@ public void OnThinkPost(entity)
 				isAlive[i] = true;
 			}
 		}
-		SetEntDataArray(entity, g_iIsAliveOffset, isAlive, 65);
+		SetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
 	}
 } 
 
-public void Voice(iClient){float Pos[3]; int iRandom = GetRandomInt(1, 16); char path[128]; GetEntPropVector(iClient, Prop_Send, "m_vecOrigin", Pos); Format(path, sizeof(path), "*/murder/voice/vo_%i.wav", iRandom); EmitAmbientSound(path, Pos, iClient, 140, _, 0.4);}
+public void Voice(iClient){
+	float Pos[3];
+	int iRandom = GetRandomInt(1, 16);
+	char path[128];
+	GetEntPropVector(iClient, Prop_Send, "m_vecOrigin", Pos);
+	Format(path, sizeof(path), "*/murder/voice/vo_%i.wav", iRandom);
+	EmitAmbientSound(path, Pos, iClient, 140, _, 0.4);
+}
 public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] sError, int iErr_max)
 {
 	CreateNative("M_GetTeam", Native_M_GetTeam);
@@ -186,25 +195,23 @@ public int Native_M_GetTeam(Handle hPlugin, int iNumParams)
 }
 public void LoadConfig_Sound()
 {
-	char 	szPath[256];
-	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/sounds.ini"); KeyValues KV_Sounds = new KeyValues("Sounds"); KV_Sounds.ImportFromFile(szPath); 
+	char szPath[256], sSectionName[64], szPathS[64];
+	BuildPath(Path_SM, szPath, sizeof szPath, "configs/murder/sounds.ini");
+	KeyValues KV_Sounds = new KeyValues("Sounds");
+	KV_Sounds.ImportFromFile(szPath); 
 	KV_Sounds.Rewind();
-	KV_Sounds.GotoFirstSubKey(false)
-	PrintToServer("______________[ LogsUpload Sounds ]______________");
-	while(KV_Sounds.GotoNextKey(false))
-	{
-		char 	sSectionName[64],
-				szPathS[64]; 
-		KV_Sounds.GetSectionName(sSectionName, sizeof(sSectionName)); 
+	KV_Sounds.GotoFirstSubKey(false);
+	
+	int sizeArray_Sounds = 0;
+	while(KV_Sounds.GotoNextKey(false))	{
+		KV_Sounds.GetSectionName(sSectionName, sizeof sSectionName); 
 		Format(szPathS, sizeof(szPathS), "*/%s", sSectionName);
 		PrecacheSound(szPathS);
 		sizeArray_Sounds++;
-		PrintToServer("| > %s Loading!", sSectionName);
-		Format(szPathS, sizeof(szPathS), "sound/%s", sSectionName);
+		Format(szPathS, sizeof szPathS, "sound/%s", sSectionName);
 		AddFileToDownloadsTable(szPathS);
 	}
-
-	PrintToServer("_________________________________________________");
+	PrintToServer("[Murder] %i sounds loaded.", sizeArray_Sounds);
 
 	delete KV_Sounds;
 }
@@ -215,18 +222,15 @@ public void LoadConfig_Names()
 	KeyValues KV_Names = new KeyValues("Male");
 	KV_Names.ImportFromFile(szPath);
 	KV_Names.Rewind();
-	KV_Names.GotoFirstSubKey(false)
-	PrintToServer("______________[ LogsUpload Names ]______________");
+	KV_Names.GotoFirstSubKey(false);
 	while(KV_Names.GotoNextKey(false))
 	{
 		char sSectionName[64];
 		KV_Names.GetSectionName(sSectionName, sizeof(sSectionName));
 		szNameList[sizeArray_Names] = sSectionName;
 		sizeArray_Names++;
-		PrintToServer("| > Имя: %s Loading!", sSectionName);
 	}
-	PrintToServer("________________________________________________");
-	PrintToServer("Имен: %i шт", sizeArray_Names);
+	PrintToServer("[Murder] %i names loaded.", sizeArray_Names);
 
 	delete KV_Names;
 }
@@ -259,8 +263,13 @@ public Action OnPlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcas
     int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
     SetEntProp(iClient, Prop_Send, "m_iHideHUD", 1<<12);
 }
-public int Native_M_MurderEnable(Handle hPlugin, int iNumParams){return MurderEnable;}
-public void OnClientPostAdminCheck(iClient){SetClientCookie(iClient, TeamPlayer, "team3"); HUDTimer[iClient] = CreateTimer(1.0, HUD, iClient, TIMER_REPEAT);}
+public int Native_M_MurderEnable(Handle hPlugin, int iNumParams) {
+	return MurderEnable;
+}
+public void OnClientPostAdminCheck(iClient) {
+	SetClientCookie(iClient, TeamPlayer, "team3");
+	HUDTimer[iClient] = CreateTimer(1.0, HUD, iClient, TIMER_REPEAT);
+}
 public Action HUD(Handle timer, iClient)
 {
 	if(IsValidClient(iClient))
@@ -339,8 +348,19 @@ public void OnMapStart()
 	LoadConfig_Sound();
 	CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
 }
-public Action CheckAccessPlaying(Handle timer){if (GetClientCount() >= MinPlayersToPlaying){MurderEnable = true; return Plugin_Stop;}else{MurderEnable = false; CGOPrintToChatAll("%t", "ChatNoPlayers", MinPlayersToPlaying); return Plugin_Continue;}}
-public Action ToggleFlashlight(iClient, const char[] CMD, Args){SetEntProp(iClient, Prop_Send, "m_fEffects", GetEntProp(iClient, Prop_Send, "m_fEffects") ^ 4);}
+public Action CheckAccessPlaying(Handle timer) {
+	if (GetClientCount() >= MinPlayersToPlaying) {
+		MurderEnable = true;
+		return Plugin_Stop;
+	} else {
+		MurderEnable = false;
+		CGOPrintToChatAll("%t", "ChatNoPlayers", MinPlayersToPlaying);
+		return Plugin_Continue;
+	}
+}
+public Action ToggleFlashlight(iClient, const char[] CMD, Args) {
+	SetEntProp(iClient, Prop_Send, "m_fEffects", GetEntProp(iClient, Prop_Send, "m_fEffects") ^ 4);
+}
 public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
 	int 	iClient = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -523,7 +543,10 @@ public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[
 	return Plugin_Continue;
 }
 
-public Action VoiceEnable(Handle timer, int iClient){CDTimer_Voice[iClient] = null; delete CDTimer_Voice[iClient];}
+public Action VoiceEnable(Handle timer, int iClient){
+	CDTimer_Voice[iClient] = null;
+	delete CDTimer_Voice[iClient];
+}
 public Action GiveWeapon(Handle timer,int iClient){SetEntDataFloat(iClient, m_flProgressBarStartTime, 0.0, true); SetEntData(iClient, m_iProgressBarDuration, 0, 1, true); Client_GiveWeapon(iClient, "weapon_knife", true); bKnifeUse[iClient]=true;}
 public void CreateDeathRagdoll(iClient)
 {
@@ -545,7 +568,7 @@ public void CreateDeathRagdoll(iClient)
 }
 
 public Action SetSolid(Handle timer, int Entity){SetEntProp(Entity, Prop_Data, "m_CollisionGroup", 6);}
-public Action OnRoundStart(Handle:event, const String:name[], bool:dontBroadcast)
+public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	//CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
 	int 	iRandom_Murder 	= GetRandomInt(1, GetClientCount()),
@@ -569,12 +592,13 @@ public Action OnRoundStart(Handle:event, const String:name[], bool:dontBroadcast
 			SDKHook(i, SDKHook_OnTakeDamage, OnTakeDamage);
 			SDKHook(i, SDKHook_WeaponEquip, EventItemPickup);
 			OnClientPostAdminCheck(i);
-			int iRandom_Name	= GetRandomInt(0, sizeArray_Names-1),
-		 		iRandom_Models	= GetRandomInt(0, sizeArray_Models-1);
-		 	SetClientInfo(i, "name", szNameList[iRandom_Name]);
-			SetEntPropString(i, Prop_Data, "m_szNetname", szNameList[iRandom_Name]);
+			if(cvChangeNicknames.IntValue) {
+				int iRandom_Name = GetRandomInt(0, sizeArray_Names - 1);
+		 		SetClientInfo(i, "name", szNameList[iRandom_Name]);
+				SetEntPropString(i, Prop_Data, "m_szNetname", szNameList[iRandom_Name]);
+			}
 			CS_SetClientClanTag(i, "");
-
+			int iRandom_Models = GetRandomInt(0, sizeArray_Models - 1);
 			SetEntityModel(i, szModelList[iRandom_Models]);
 			int iMelee;
 			if (iRandom_Murder == i)
