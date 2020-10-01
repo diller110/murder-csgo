@@ -11,8 +11,17 @@
 #include <murder>
 #define  REQUIRE_PLUGIN
 
+public Plugin myinfo = {
+	name 		= "Murder | Ядро плагина",
+	author 		= "Rustgame",
+	description = "Murder - Является игровым режимом, где простым очевидцами придется выяснить кто убийца, и не стать его жертвой.",
+	version		= "1.0a"
+};
+
+int role[MAXPLAYERS + 1],
+	minPlayers;
+
 int 	RagdollPlayer[MAXPLAYERS+1],
-		MinPlayersToPlaying,
 		sizeArray_Names = 0,
 		sizeArray_Models = 0,
 		iOldButtons[MAXPLAYERS+1],
@@ -38,27 +47,18 @@ bool 	g_InUse[MAXPLAYERS+1],
 Handle 	CDTimer_Voice[MAXPLAYERS+1];
 ConVar cvChangeNicknames = null;
 
-public Plugin myinfo = 
-{
-	name 		= "Murder | Ядро плагина",
-	author 		= "Rustgame",
-	description = "Murder - Является игровым режимом, где простым очевидцами придется выяснить кто убийца, и не стать его жертвой.",
-};
 
-public void OnPluginStart()
-{
+
+public void OnPluginStart() {
 	cvChangeNicknames = CreateConVar("sm_murder_changenicknames", "1", "Change player nicknames");
 	
 	LoadTranslations("murder.phrases");
 
-	PrintToServer("[ Murder ][ Core ] StartPlugin");
-	TeamPlayer = RegClientCookie("team", "", CookieAccess_Private);
-
-	HookEvent("round_start", OnRoundStart, EventHookMode_PostNoCopy);
-	HookEvent("round_end", OnRoundEnd, EventHookMode_PostNoCopy);
-	HookEvent("player_death", OnPlayerDeath, EventHookMode_Pre);
-	HookEvent("player_spawn", OnPlayerSpawn, EventHookMode_Pre);
-	HookEvent("player_shoot", OnPlayerShoot); 
+	HookEvent("round_start",	Event_RoundStart,	EventHookMode_PostNoCopy);
+	HookEvent("round_end",		Event_RoundEnd, 	EventHookMode_PostNoCopy);
+	HookEvent("player_death",	Event_PlayerDeath,	EventHookMode_Pre);
+	HookEvent("player_spawn",	Event_PlayerSpawn,	EventHookMode_Pre);
+	HookEvent("player_shoot",	Event_PlayerShoot); 
 
 	AddCommandListener(ToggleFlashlight, "+lookatweapon");
 	AddCommandListener(ScoreOff, "+score");
@@ -71,9 +71,11 @@ public void OnPluginStart()
 	if (g_iIsAliveOffset == -1)
 		SetFailState("CCSPlayerResource.m_bAlive offset is invalid"); 
 
-	char 	szPath[256];
-	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/configs.ini"); KeyValues KV_Config = new KeyValues("Murder"); KV_Config.ImportFromFile(szPath);
-	MinPlayersToPlaying = KV_Config.GetNum("MinPlayersToPlaying");
+	char szPath[256];
+	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/configs.ini");
+	KeyValues KV_Config = new KeyValues("Murder");
+	KV_Config.ImportFromFile(szPath);
+	minPlayers = KV_Config.GetNum("MinPlayersToPlaying");
 	KV_Config.GetString("RoundStart", 		RoundSoundList[0], sizeof(RoundSoundList));
 	KV_Config.GetString("RoundWinMurder", 	RoundSoundList[1], sizeof(RoundSoundList));
 	KV_Config.GetString("RoundNoWinMurder", RoundSoundList[2], sizeof(RoundSoundList));
@@ -109,7 +111,7 @@ public Action StartThink(Handle timer)
 
 public void OnClientDisconnect(iClient)
 {
-	if (M_IsMurder(iClient))
+	if (Murder_GetClientRole(iClient) == Murder_Imposter)
 	{
 		CGOPrintToChatAll("%t", "MurderLeave");
 		ServerCommand("mp_restartgame 1");
@@ -258,9 +260,9 @@ public void LoadConfig_Models()
 	delete KV_Models;
 }
 
-public Action OnPlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast)
+public Action Event_PlayerSpawn(Event event, const char[] sName, bool bDontBroadcast)
 {
-    int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
+    int iClient = GetClientOfUserId(event.GetInt("userid"));
     SetEntProp(iClient, Prop_Send, "m_iHideHUD", 1<<12);
 }
 public int Native_M_MurderEnable(Handle hPlugin, int iNumParams) {
@@ -307,7 +309,7 @@ public Action HUD(Handle timer, iClient)
 			ShowHudText(iClient, -1, "Улик на локации: %i", M_GetCountLoots());
 			SetHudTextParams(0.012, 0.5, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
 			ShowHudText(iClient, -1, "%t R", "Voice");
-			if (M_IsMurder(iClient))
+			if (Murder_GetClientRole(iClient) == Murder_Imposter)
 			{
 				SetHudTextParams(0.012, 0.52, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
 				if(bKnifeUse[iClient])
@@ -346,22 +348,22 @@ public void OnMapStart()
 	SetConVarInt(HideName, 2); SetConVarInt(LimitTeam, 30); SetConVarInt(EnemyKill, 1); SetConVarInt(WarTimers, 0);
 	LoadConfig_Models();
 	LoadConfig_Sound();
-	CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
+	CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 public Action CheckAccessPlaying(Handle timer) {
-	if (GetClientCount() >= MinPlayersToPlaying) {
+	if (GetClientCount() >= minPlayers) {
 		MurderEnable = true;
 		return Plugin_Stop;
 	} else {
 		MurderEnable = false;
-		CGOPrintToChatAll("%t", "ChatNoPlayers", MinPlayersToPlaying);
+		CGOPrintToChatAll("%t", "ChatNoPlayers", minPlayers);
 		return Plugin_Continue;
 	}
 }
 public Action ToggleFlashlight(iClient, const char[] CMD, Args) {
 	SetEntProp(iClient, Prop_Send, "m_fEffects", GetEntProp(iClient, Prop_Send, "m_fEffects") ^ 4);
 }
-public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
+public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
 	int 	iClient = GetClientOfUserId(GetEventInt(event, "userid"));
 	int 	iAttacker = GetClientOfUserId(GetEventInt(event, "attacker"));
@@ -380,6 +382,7 @@ public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 		CGOPrintToChatAll("%t", "noMurderWin")
 		Format(Team, sizeof(Team), "%t", "MurderBy");
 		CGOPrintToChatAll("%s %N", Team, iClient);
+		
 		return Plugin_Changed;
 	}
 	else
@@ -388,7 +391,16 @@ public Action OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
 		{
 			ForcePlayerSuicide(iAttacker);
 			CGOPrintToChat(iAttacker, "%t", "rdmKill");
+		} else {
+			if (bKnifeUse[iAttacker] == true)
+			{
+				Client_RemoveWeapon(iAttacker, "weapon_knife", false);
+				bKnifeUse[iAttacker]=false;
+				TimerGetKnife[iAttacker] = INVALID_HANDLE;
+			}
 		}
+		
+		
 	}
 
 	int iAlive = 0;
@@ -430,8 +442,8 @@ public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[
 		{
 			if (bKnifeUse[iClient] == true)
 			{
-				char W[32];
-				GetClientWeapon(iClient, W, sizeof(W));
+				//char W[32];
+				//GetClientWeapon(iClient, W, sizeof(W));
 				Client_RemoveWeapon(iClient, "weapon_knife", false);
 				bKnifeUse[iClient]=false;
 				TimerGetKnife[iClient] = INVALID_HANDLE;
@@ -525,7 +537,7 @@ public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[
 				Format(Tr, sizeof(Tr), "%t ", "OwnerRandoll", owner);
 				if (owner <= 0) CGOPrintToChat(iClient, "%t", "OwnerRandollDIS"); else CGOPrintToChat(iClient, "%s %N", Tr, owner);
 
-				if (M_IsMurder(iClient) && M_GetCountLoot(iClient)>=HideRagdoll_Price)
+				if (Murder_GetClientRole(iClient) == Murder_Imposter && M_GetCountLoot(iClient)>=HideRagdoll_Price)
 				{	
 					CGOPrintToChat(iClient, "{RED}Murder | {DEFAULT}Вы спрятали труп!");
 					RemoveEntity(aim);
@@ -568,7 +580,7 @@ public void CreateDeathRagdoll(iClient)
 }
 
 public Action SetSolid(Handle timer, int Entity){SetEntProp(Entity, Prop_Data, "m_CollisionGroup", 6);}
-public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
+public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	//CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
 	int 	iRandom_Murder 	= GetRandomInt(1, GetClientCount()),
@@ -626,11 +638,18 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 		}
 	}
 }
-public Action OnRoundEnd(Handle:event, const String:name[], bool:dontBroadcast){for(int i = 1; i <= MaxClients; ++i){if (IsValidClient(i)) {SetClientCookie(i, TeamPlayer, "team3");}}}
-public Action OnPlayerShoot(Event event, char[] name, bool dontBroadcast){int iClient = GetClientOfUserId(GetEventInt(event, "userid")); GetEntData(iClient, FindSendPropInfo("CCSPlayer", "m_iAmmo")+(1*4), 4); }
-
-public Action OnTakeDamage(victim, &attacker, &inflictor, &Float:damage, &damagetype)
-{
+public Action Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
+	for(int i = 1; i <= MaxClients; ++i) {
+		if (IsValidClient(i)) {
+			SetClientCookie(i, TeamPlayer, "team3");
+		}
+	}
+}
+public Action Event_PlayerShoot(Event event, char[] name, bool dontBroadcast) {
+	int iClient = GetClientOfUserId(GetEventInt(event, "userid"));
+	GetEntData(iClient, FindSendPropInfo("CCSPlayer", "m_iAmmo")+(1*4), 4);
+}
+public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
 	char 	sWeapon[32];
 	GetClientWeapon(inflictor, sWeapon, sizeof(sWeapon))
 	if(StrEqual(sWeapon, "weapon_knife"))
