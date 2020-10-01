@@ -25,6 +25,7 @@ Murder_State state = Murder_Disabled;
 int minPlayers;
 ConVar	cvChangeNicknames = null,
 		cvImposterKillCooldown = null;
+int lastKillTime[MAXPLAYERS + 1];
 
 int 	RagdollPlayer[MAXPLAYERS+1],
 		sizeArray_Names = 0,
@@ -336,6 +337,8 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 					CGOPrintToChat(attacker, "%t", "rdmKill");
 				}
 				default: {
+					lastKillTime[attacker] = GetTime();
+					
 					if (bKnifeUse[attacker] == true) {
 						Client_RemoveWeapon(attacker, "weapon_knife", false);
 						bKnifeUse[attacker] = false;
@@ -384,15 +387,17 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					TimerGetKnife[client] = INVALID_HANDLE;
 				} else {
 					if (TimerGetKnife[client] == null) {
-						TimerGetKnife[client] 	= CreateTimer(2.0, GiveWeapon, client);
-						float flGameTime 		= GetGameTime();
-						SetEntData(client, m_iProgressBarDuration, 2, 4, true);
-						SetEntDataFloat(client, m_flProgressBarStartTime, flGameTime - (float(2) - 2.0), true);
-						SetEntDataFloat(client, m_flSimulationTime, flGameTime + 2.0, true);
-						SetEntData(client, m_iBlockingUseActionInProgress, 0, 4, true);
+						int time = 2;
+						
+						if (GetTime() - lastKillTime[client] < cvImposterKillCooldown.IntValue) {
+							time = cvImposterKillCooldown.IntValue - (GetTime() - lastKillTime[client]);
+						}
+						
+						TimerGetKnife[client] 	= CreateTimer(float(time), GiveWeapon, client);
+						
+						SetProgressBarFloat(client, float(time));
 					} else {
-						SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true);
-						SetEntData(client, m_iProgressBarDuration, 0, 1, true);
+						SetProgressBarFloat(client, 0.0);
 						delete TimerGetKnife[client];
 					}
 				}
@@ -564,4 +569,19 @@ public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &dam
 	} 
 	
 	return Plugin_Changed;
+}
+
+void SetProgressBarFloat(int client, float fProgressTime) {
+	if(fProgressTime <= 0.0) {
+		SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true);
+		SetEntData(client, m_iProgressBarDuration, 0, 1, true);
+		return;
+	}
+	int iProgressTime = RoundToCeil(fProgressTime);
+	float flGameTime = GetGameTime();
+	
+	SetEntDataFloat(client, m_flSimulationTime, flGameTime + fProgressTime, true);
+	SetEntData(client, m_iProgressBarDuration, iProgressTime, 4, true);
+	SetEntDataFloat(client, m_flProgressBarStartTime, flGameTime - (iProgressTime - fProgressTime), true);
+	SetEntData(client, m_iBlockingUseActionInProgress, 0, 4, true);
 }
