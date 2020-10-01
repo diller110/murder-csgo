@@ -1,9 +1,11 @@
-#include <sourcemod>
-#include <sdktools>
-#include <sdkhooks>
 #include <steamworks>
+
+#pragma semicolon 1
+#pragma newdecls required
+
 #include <cstrike>
-#include <csgo_colors>	
+#include <sdkhooks>
+#include <csgo_colors>
 #include <smlib>
 #include <clientprefs>
 
@@ -21,36 +23,32 @@ public Plugin myinfo = {
 Murder_Role role[MAXPLAYERS + 1];
 Murder_State state = Murder_Disabled;
 int minPlayers;
+ConVar	cvChangeNicknames = null,
+		cvImposterKillCooldown = null;
 
 int 	RagdollPlayer[MAXPLAYERS+1],
 		sizeArray_Names = 0,
 		sizeArray_Models = 0,
-		iOldButtons[MAXPLAYERS+1],
 		m_flSimulationTime = -1,
 		m_flProgressBarStartTime = -1,
 		m_iProgressBarDuration = -1,
 		m_iBlockingUseActionInProgress = -1,
 		g_iIsAliveOffset,
 		HideRagdoll_Price;
-bool 	MurderEnable,
-		bKnifeUse[MAXPLAYERS+1];
+bool 	bKnifeUse[MAXPLAYERS+1];
 char 	szNameList[PLATFORM_MAX_PATH][64],
 		szModelList[PLATFORM_MAX_PATH][128],
 		RoundSoundList[PLATFORM_MAX_PATH][128];
 Handle 	HUDTimer[MAXPLAYERS+1],
 		TimerGetKnife[MAXPLAYERS+1];
 
-bool 	g_InUse[MAXPLAYERS+1],
-		g_InAttack2[MAXPLAYERS+1],
-		g_InAttack1[MAXPLAYERS+1],
-		g_InReload[MAXPLAYERS+1];
 Handle 	CDTimer_Voice[MAXPLAYERS+1];
-ConVar cvChangeNicknames = null;
 
 
 
 public void OnPluginStart() {
 	cvChangeNicknames = CreateConVar("sm_murder_changenicknames", "1", "Change player nicknames");
+	cvImposterKillCooldown = CreateConVar("sm_murder_killcooldown", "10", "Cooldown after imposter kill");
 	
 	LoadTranslations("murder.phrases");
 
@@ -102,50 +100,39 @@ public void OnPluginStart() {
 	CreateTimer(1.0, StartThink);
 }
 
-public Action StartThink(Handle timer)
-{
+public Action StartThink(Handle timer) {
 	int CSPlayerManagerIndex = FindEntityByClassname(0, "cs_player_manager");
 	SDKHook(CSPlayerManagerIndex, SDKHook_ThinkPost, OnThinkPost);
 }
 
-public void OnClientDisconnect(client)
-{
-	if (Murder_GetClientRole(client) == Murder_Imposter)
-	{
+public void OnClientDisconnect(int client) {
+	if (Murder_GetClientRole(client) == Murder_Imposter) {
 		CGOPrintToChatAll("%t", "MurderLeave");
 		ServerCommand("mp_restartgame 1");
 	}
 }
 
-public Action Stuck(client, Args)
-{
+public Action Stuck(int client, int args) {
 	int aim = GetClientAimTarget(client, false);
-	if (aim > MaxClients)
-	{
+	if (aim > MaxClients) {
 		char class[128];
 		GetEntityClassname(aim, class, sizeof(class));
-		
 	}
 }
-public void OnThinkPost(entity) 
-{
-	if (entity >=0)
-	{
-		static int isAlive[MAXPLAYERS+1];
+public void OnThinkPost(int entity) {
+	if (entity < 0)return;
+	static int isAlive[MAXPLAYERS+1];
     
-		GetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
-		for (new i = 1; i <= MaxClients; ++i)
-		{
-			if (IsValidClient(i))
-			{
-				isAlive[i] = true;
-			}
+	GetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
+	for (int i = 1; i <= MaxClients; ++i) {
+		if (IsValidClient(i)) {
+			isAlive[i] = true;
 		}
-		SetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
 	}
+	SetEntDataArray(entity, g_iIsAliveOffset, isAlive, sizeof isAlive);
 } 
 
-public void Voice(client){
+public void Voice(int client) {
 	float Pos[3];
 	int iRandom = GetRandomInt(1, 16);
 	char path[128];
@@ -153,8 +140,7 @@ public void Voice(client){
 	Format(path, sizeof(path), "*/murder/voice/vo_%i.wav", iRandom);
 	EmitAmbientSound(path, Pos, client, 140, _, 0.4);
 }
-public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] sError, int iErr_max)
-{
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
 	CreateNative("Murder_GetState", Native_GetState);
 	CreateNative("Murder_GetClientRole", Native_GetClientRole);
 	MarkNativeAsOptional("M_GetCountLoot");
@@ -170,8 +156,7 @@ public int Native_GetClientRole(Handle plugin, int numParams) {
 	int client = GetNativeCell(1);
 	return view_as<int>(role[client]);
 }
-public void LoadConfig_Sound()
-{
+public void LoadConfig_Sound() {
 	char szPath[256], sSectionName[64], szPathS[64];
 	BuildPath(Path_SM, szPath, sizeof szPath, "configs/murder/sounds.ini");
 	KeyValues KV_Sounds = new KeyValues("Sounds");
@@ -192,8 +177,7 @@ public void LoadConfig_Sound()
 
 	delete KV_Sounds;
 }
-public void LoadConfig_Names()
-{
+public void LoadConfig_Names() {
 	char 	szPath[256];
 	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/names.ini");
 	KeyValues KV_Names = new KeyValues("Male");
@@ -211,36 +195,28 @@ public void LoadConfig_Names()
 
 	delete KV_Names;
 }
-
-public void LoadConfig_Models()
-{
-	char 	szPath[256];
-	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/models.ini"); KeyValues KV_Models = new KeyValues("Models"); KV_Models.ImportFromFile(szPath); 
+public void LoadConfig_Models() {
+	char szPath[256];
+	BuildPath(Path_SM, szPath, sizeof(szPath), "configs/murder/models.ini");
+	KeyValues KV_Models = new KeyValues("Models");
+	KV_Models.ImportFromFile(szPath); 
 	KV_Models.Rewind();
-	KV_Models.GotoFirstSubKey(false)
-	PrintToServer("______________[ LogsUpload Models ]______________");
-	while(KV_Models.GotoNextKey(false))
-	{
+	KV_Models.GotoFirstSubKey(false);
+	while(KV_Models.GotoNextKey(false)) {
 		char sSectionName[64]; 
 		KV_Models.GetSectionName(sSectionName, sizeof(sSectionName)); 
 		szModelList[sizeArray_Models] = sSectionName; 
 		PrecacheModel(sSectionName);
 		sizeArray_Models++;
-		PrintToServer("| > %s Loading!", sSectionName);
 		AddFileToDownloadsTable(sSectionName);
 	}
-
-	PrintToServer("_________________________________________________");
-
+	PrintToServer("[Murer] % models loaded.", sizeArray_Models);
+	
 	delete KV_Models;
 }
-
 public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     SetEntProp(client, Prop_Send, "m_iHideHUD", 1<<12);
-}
-public int Native_M_MurderEnable(Handle hPlugin, int iNumParams) {
-	return MurderEnable;
 }
 public void OnClientPostAdminCheck(int client) {
 	role[client] = Murder_Crewmate;
@@ -321,15 +297,15 @@ public void OnMapStart() {
 }
 public Action CheckAccessPlaying(Handle timer) {
 	if (GetClientCount() >= minPlayers) {
-		MurderEnable = true;
+		state = Murder_InProgress;
 		return Plugin_Stop;
 	} else {
-		MurderEnable = false;
+		state = Murder_Disabled;
 		CGOPrintToChatAll("%t", "ChatNoPlayers", minPlayers);
 		return Plugin_Continue;
 	}
 }
-public Action ToggleFlashlight(client, const char[] CMD, Args) {
+public Action ToggleFlashlight(int client, const char[] command, int args) {
 	SetEntProp(client, Prop_Send, "m_fEffects", GetEntProp(client, Prop_Send, "m_fEffects") ^ 4);
 }
 public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
@@ -347,7 +323,7 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 		case Murder_Imposter: {
 			EmitSoundToAll(RoundSoundList[2],_,_,_,_,0.2);
 			CS_TerminateRound(5.0, CSRoundEnd_CTStoppedEscape, false);
-			CGOPrintToChatAll("%t", "noMurderWin")
+			CGOPrintToChatAll("%t", "noMurderWin");
 			Format(buff, sizeof buff, "%t", "MurderBy");
 			CGOPrintToChatAll("%s %N", buff, client);
 			
@@ -392,94 +368,65 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 
 	return Plugin_Changed;
 }
-
-public Action ScoreOff(int client, const char[] command, int args){
+public Action ScoreOff(int client, const char[] command, int args) {
 	return Plugin_Handled;
 }
-public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
-{
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2]) {
+	static _buttons[MAXPLAYERS + 1];
 	if (!IsValidClient(client)) return Plugin_Continue;
 
 	switch(role[client]) {
 		case Murder_Imposter: {
-			if (!g_InAttack2[client] && buttons & IN_ATTACK2)
-			{
-				if (bKnifeUse[client] == true)
-				{
-					//char W[32];
-					//GetClientWeapon(client, W, sizeof(W));
+			if(buttons & IN_ATTACK2 && !(_buttons[client] & IN_ATTACK2)) { // First click
+				if (bKnifeUse[client] == true) {
 					Client_RemoveWeapon(client, "weapon_knife", false);
 					bKnifeUse[client]=false;
 					TimerGetKnife[client] = INVALID_HANDLE;
-				}
-				else
-				{	
-					if (TimerGetKnife[client] == null)
-					{
+				} else {
+					if (TimerGetKnife[client] == null) {
 						TimerGetKnife[client] 	= CreateTimer(2.0, GiveWeapon, client);
 						float flGameTime 		= GetGameTime();
 						SetEntData(client, m_iProgressBarDuration, 2, 4, true);
 						SetEntDataFloat(client, m_flProgressBarStartTime, flGameTime - (float(2) - 2.0), true);
 						SetEntDataFloat(client, m_flSimulationTime, flGameTime + 2.0, true);
 						SetEntData(client, m_iBlockingUseActionInProgress, 0, 4, true);
-					}
-					else
-					{
+					} else {
 						SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true);
 						SetEntData(client, m_iProgressBarDuration, 0, 1, true);
 						delete TimerGetKnife[client];
 					}
 				}
-				
-				g_InAttack2[client] 		= true;
-			}
-			else if(g_InAttack2[client] && !(buttons & IN_ATTACK2))
-			{
-				g_InAttack2[client] = false;
 			}
 		}
 	}
 
-	if (!g_InAttack1[client] && buttons & IN_ATTACK) {
+	if(buttons & IN_ATTACK && !(_buttons[client] & IN_ATTACK)) { // First click
 		int aim = GetClientAimTarget(client, false);
-		if (aim > MaxClients)
-		{
-			char class[128];
-			GetEntityClassname(aim, class, sizeof(class));
-			if (StrEqual(class, "prop_ragdoll"))
-			{
+		if (aim > MaxClients) {
+			static char class[128];
+			GetEntityClassname(aim, class, sizeof class);
+			if (StrEqual(class, "prop_ragdoll")) {
 				SetEntProp(aim, Prop_Data, "m_CollisionGroup", 1);
 				CreateTimer(2.0, SetSolid, aim);
 			}
-			
-			g_InAttack1[client] 		= true;
 		}
-	} else if(g_InAttack1[client] && !(buttons & IN_ATTACK)) {
-		g_InAttack1[client] = false;
 	}
-
-	if (!g_InReload[client] && buttons & IN_RELOAD)	{
-		if(IsPlayerAlive(client)) {
-			g_InReload[client] = true;
-
+	
+	if(buttons & IN_RELOAD && !(_buttons[client] & IN_RELOAD)) { // First click
+		if(IsPlayerAlive(client)) {	
 			if (CDTimer_Voice[client] == null) {
 				Voice(client);
 				CDTimer_Voice[client] = CreateTimer(2.0, VoiceEnable, client);
 			}
 		}
-	} else if(g_InReload[client] && !(buttons & IN_RELOAD)) {
-		g_InReload[client] = false;
 	}
 
-	if(buttons & IN_SCORE && !(iOldButtons[client] & IN_SCORE))	{
+	if(buttons & IN_SCORE && !(_buttons[client] & IN_SCORE)) {
 		StartMessageOne("ServerRankRevealAll", client, USERMSG_BLOCKHOOKS);
 		EndMessage();
 	}
 
-	iOldButtons[client] = buttons;
-
-	if (!g_InUse[client] && buttons & IN_USE) {
-		g_InUse[client] = true;
+	if(buttons & IN_USE && !(_buttons[client] & IN_USE)) {
 		int aim = GetClientAimTarget(client, false);
 		if (aim > MaxClients) {
 			char class[128];
@@ -500,23 +447,25 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				
 			}
 		}
-	} else if(g_InUse[client] && !(buttons & IN_USE)) {
-		g_InUse[client] = false;
 	}
 
+	_buttons[client] = buttons;
 	return Plugin_Continue;
 }
 
-public Action VoiceEnable(Handle timer, int client){
+public Action VoiceEnable(Handle timer, int client) {
 	CDTimer_Voice[client] = null;
 	delete CDTimer_Voice[client];
 }
-public Action GiveWeapon(Handle timer,int client){SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true); SetEntData(client, m_iProgressBarDuration, 0, 1, true); Client_GiveWeapon(client, "weapon_knife", true); bKnifeUse[client]=true;}
-public void CreateDeathRagdoll(client)
-{
+public Action GiveWeapon(Handle timer,int client) {
+	SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true);
+	SetEntData(client, m_iProgressBarDuration, 0, 1, true);
+	Client_GiveWeapon(client, "weapon_knife", true);
+	bKnifeUse[client] = true;
+}
+public void CreateDeathRagdoll(int client) {
 	RagdollPlayer[client] = CreateEntityByName("prop_ragdoll");
-	if (RagdollPlayer[client] == -1)
-		return;
+	if (RagdollPlayer[client] == -1) return;
 	
 	char sModel[PLATFORM_MAX_PATH];
 	GetClientModel(client, sModel, sizeof(sModel));
@@ -531,7 +480,9 @@ public void CreateDeathRagdoll(client)
 	TeleportEntity(RagdollPlayer[client], vec, NULL_VECTOR, NULL_VECTOR);
 }
 
-public Action SetSolid(Handle timer, int Entity){SetEntProp(Entity, Prop_Data, "m_CollisionGroup", 6);}
+public Action SetSolid(Handle timer, int entity) {
+	SetEntProp(entity, Prop_Data, "m_CollisionGroup", 6);
+}
 public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast) {
 	//CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
 	int clientCount = GetClientCount();
@@ -605,7 +556,7 @@ public Action Event_PlayerShoot(Event event, char[] name, bool dontBroadcast) {
 public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
 	static char weapon[32];
 	
-	GetClientWeapon(inflictor, weapon, sizeof weapon)
+	GetClientWeapon(inflictor, weapon, sizeof weapon);
 	if(StrEqual(weapon, "weapon_fists")) {
 		damage = 0.0;
 	} else if(StrEqual(weapon, "weapon_knife") || StrEqual(weapon, "weapon_revolver")) {
