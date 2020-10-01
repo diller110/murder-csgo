@@ -18,8 +18,9 @@ public Plugin myinfo = {
 	version		= "1.0a"
 };
 
-int role[MAXPLAYERS + 1],
-	minPlayers;
+Murder_Role role[MAXPLAYERS + 1];
+Murder_State state = Murder_Disabled;
+int minPlayers;
 
 int 	RagdollPlayer[MAXPLAYERS+1],
 		sizeArray_Names = 0,
@@ -36,8 +37,7 @@ bool 	MurderEnable,
 char 	szNameList[PLATFORM_MAX_PATH][64],
 		szModelList[PLATFORM_MAX_PATH][128],
 		RoundSoundList[PLATFORM_MAX_PATH][128];
-Handle 	TeamPlayer,
-		HUDTimer[MAXPLAYERS+1],
+Handle 	HUDTimer[MAXPLAYERS+1],
 		TimerGetKnife[MAXPLAYERS+1];
 
 bool 	g_InUse[MAXPLAYERS+1],
@@ -87,7 +87,6 @@ public void OnPluginStart() {
 	LoadConfig_Names();
 
 	RegConsoleCmd("sm_du", Stuck);
-	RegConsoleCmd("sm_team", GetTeam);
 
 	for(int i = 1; i <= GetClientCount(); ++i) 
 	{
@@ -109,25 +108,18 @@ public Action StartThink(Handle timer)
 	SDKHook(CSPlayerManagerIndex, SDKHook_ThinkPost, OnThinkPost);
 }
 
-public void OnClientDisconnect(iClient)
+public void OnClientDisconnect(client)
 {
-	if (Murder_GetClientRole(iClient) == Murder_Imposter)
+	if (Murder_GetClientRole(client) == Murder_Imposter)
 	{
 		CGOPrintToChatAll("%t", "MurderLeave");
 		ServerCommand("mp_restartgame 1");
 	}
 }
 
-public Action GetTeam(iClient, Args)
+public Action Stuck(client, Args)
 {
-	char Team[32];
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	CGOPrintToChatAll("%N - %s", iClient, Team);
-}
-
-public Action Stuck(iClient, Args)
-{
-	int aim = GetClientAimTarget(iClient, false);
+	int aim = GetClientAimTarget(client, false);
 	if (aim > MaxClients)
 	{
 		char class[128];
@@ -153,47 +145,30 @@ public void OnThinkPost(entity)
 	}
 } 
 
-public void Voice(iClient){
+public void Voice(client){
 	float Pos[3];
 	int iRandom = GetRandomInt(1, 16);
 	char path[128];
-	GetEntPropVector(iClient, Prop_Send, "m_vecOrigin", Pos);
+	GetEntPropVector(client, Prop_Send, "m_vecOrigin", Pos);
 	Format(path, sizeof(path), "*/murder/voice/vo_%i.wav", iRandom);
-	EmitAmbientSound(path, Pos, iClient, 140, _, 0.4);
+	EmitAmbientSound(path, Pos, client, 140, _, 0.4);
 }
 public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] sError, int iErr_max)
 {
-	CreateNative("M_GetTeam", Native_M_GetTeam);
-	CreateNative("M_MurderEnable", Native_M_MurderEnable);
-	CreateNative("M_IsMurder", Native_M_IsMurder);
+	CreateNative("Murder_GetState", Native_GetState);
+	CreateNative("Murder_GetClientRole", Native_GetClientRole);
 	MarkNativeAsOptional("M_GetCountLoot");
 	MarkNativeAsOptional("M_SetCountLoot");
 	MarkNativeAsOptional("M_GetCountLoots");
 
 	return APLRes_Success;
 }
-public int Native_M_IsMurder(Handle hPlugin, int iNumParams)
-{
-	int iClient = GetNativeCell(1);
-	char Team[32];
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	if (StrEqual(Team, "team1"))
-	{
-		return true
-	}
-	else
-	{
-		return false
-	}
+public int Native_GetState(Handle plugin, int numParams) {
+	return view_as<int>(state);
 }
-public int Native_M_GetTeam(Handle hPlugin, int iNumParams)
-{
-	int iClient = GetNativeCell(1);
-	char Team[32];
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	ReplaceString(Team, sizeof(Team), "team", "");
-	int iTeam = StringToInt(Team);
-	return iTeam;
+public int Native_GetClientRole(Handle plugin, int numParams) {
+	int client = GetNativeCell(1);
+	return view_as<int>(role[client]);
 }
 public void LoadConfig_Sound()
 {
@@ -260,92 +235,86 @@ public void LoadConfig_Models()
 	delete KV_Models;
 }
 
-public Action Event_PlayerSpawn(Event event, const char[] sName, bool bDontBroadcast)
-{
-    int iClient = GetClientOfUserId(event.GetInt("userid"));
-    SetEntProp(iClient, Prop_Send, "m_iHideHUD", 1<<12);
+public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    SetEntProp(client, Prop_Send, "m_iHideHUD", 1<<12);
 }
 public int Native_M_MurderEnable(Handle hPlugin, int iNumParams) {
 	return MurderEnable;
 }
-public void OnClientPostAdminCheck(iClient) {
-	SetClientCookie(iClient, TeamPlayer, "team3");
-	HUDTimer[iClient] = CreateTimer(1.0, HUD, iClient, TIMER_REPEAT);
+public void OnClientPostAdminCheck(int client) {
+	role[client] = Murder_Crewmate;
+	HUDTimer[client] = CreateTimer(1.0, HUD, client, TIMER_REPEAT);
 }
-public Action HUD(Handle timer, iClient)
-{
-	if(IsValidClient(iClient))
-	{
-		if(IsPlayerAlive(iClient))
-		{
-			char 	Team[64],
-					HEXColorTeam[32],
-					TeamText[64];
-			GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-			if (StrEqual(Team, "team1"))
-			{
-				Format(TeamText, sizeof(TeamText), "%t", "tMurder"); 
-				HEXColorTeam = "#ff0000";
-			}
-			else if(StrEqual(Team, "team2"))
-			{
-				Format(TeamText, sizeof(TeamText), "%t", "tPolice"); 
-				HEXColorTeam = "#0000ff";
-			}
-			else
-			{
-				Format(TeamText, sizeof(TeamText), "%t", "noMurder");
-				HEXColorTeam = "#00ffff";
-			}
+public Action HUD(Handle timer, int client) {
+	if(!IsValidClient(client)) {
+		HUDTimer[client] = null;
+		return;
+	}
+	if (!IsPlayerAlive(client))return;
 
-			char StringText[2048];	
-			Format(StringText, sizeof(StringText), "<font color='#fff'>______________</font>[ <font color='#ff0000'>Murder</font> ]<font color='#fff'>______________</font>\
-				\n%t<font color='%s'>%s</font> \	
-				\n%t <font color='#9900ff'>%i шт.</font>", "HRole", HEXColorTeam, TeamText, "HEvidence", M_GetCountLoot(iClient));
-			PrintHintText(iClient, StringText);
-
-			
-			SetHudTextParams(0.012, 0.48, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
-			ShowHudText(iClient, -1, "Улик на локации: %i", M_GetCountLoots());
-			SetHudTextParams(0.012, 0.5, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
-			ShowHudText(iClient, -1, "%t R", "Voice");
-			if (Murder_GetClientRole(iClient) == Murder_Imposter)
-			{
-				SetHudTextParams(0.012, 0.52, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
-				if(bKnifeUse[iClient])
-				{
-					ShowHudText(iClient, -1, "%t", "HideKnife");
-				}
-				else
-				{
-					ShowHudText(iClient, -1, "%t", "UseKnife");
-				}
-
-				SetHudTextParams(0.012, 0.54, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
-				ShowHudText(iClient, -1, "Спрятать тело: E + %i Улик(и)", HideRagdoll_Price);
-			}
+	static char HEXColorTeam[32], TeamText[64];
+	
+	switch(role[client]) {
+		case Murder_Crewmate: {
+			Format(TeamText, sizeof(TeamText), "%t", "noMurder");
+			HEXColorTeam = "#00ffff";
+		}
+		case Murder_Imposter: {
+			Format(TeamText, sizeof(TeamText), "%t", "tMurder"); 
+			HEXColorTeam = "#ff0000";
+		}
+		case Murder_Officer: {
+			Format(TeamText, sizeof(TeamText), "%t", "tPolice"); 
+			HEXColorTeam = "#0000ff";
 		}
 	}
-	else
-	{
-		HUDTimer[iClient] = null;
-	}
-}
-public Action EventItemPickup(iClient, Entity)
-{
-	char 	Team[32],
-			Weapon[64];
-	GetEntityClassname(Entity, Weapon, sizeof(Weapon));
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	if (StrEqual(Weapon, "weapon_deagle") && StrEqual(Team, "team1")){return Plugin_Handled;}
+	
+	char StringText[2048];	
+	Format(StringText, sizeof(StringText), "<font color='#fff'>______________</font>[ <font color='#ff0000'>Murder</font> ]<font color='#fff'>______________</font>\
+		\n%t<font color='%s'>%s</font> \	
+		\n%t <font color='#9900ff'>%i шт.</font>", "HRole", HEXColorTeam, TeamText, "HEvidence", M_GetCountLoot(client));
+	PrintHintText(client, StringText);
 
+	
+	SetHudTextParams(0.012, 0.48, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
+	ShowHudText(client, -1, "Улик на локации: %i", M_GetCountLoots());
+	SetHudTextParams(0.012, 0.5, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
+	ShowHudText(client, -1, "%t R", "Voice");
+	if (Murder_GetClientRole(client) == Murder_Imposter)
+	{
+		SetHudTextParams(0.012, 0.52, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
+		if(bKnifeUse[client])
+		{
+			ShowHudText(client, -1, "%t", "HideKnife");
+		}
+		else
+		{
+			ShowHudText(client, -1, "%t", "UseKnife");
+		}
+
+		SetHudTextParams(0.012, 0.54, 5.0, 255,255,255, 255, 0, 0.0, 0.5, 0.1);
+		ShowHudText(client, -1, "Спрятать тело: E + %i Улик(и)", HideRagdoll_Price);
+	}
+
+}
+public Action EventItemPickup(int client, int entity) {
+	static char Weapon[64];
+	GetEntityClassname(entity, Weapon, sizeof(Weapon));
+	if (role[client] == Murder_Imposter && StrEqual(Weapon, "weapon_deagle")) {
+		return Plugin_Handled;
+	}
 	return Plugin_Continue;
 }
-	
-public void OnMapStart()
-{
-	Handle 	HideName  = FindConVar("mp_playerid"), LimitTeam = FindConVar("mp_limitteams"), EnemyKill = FindConVar("mp_teammates_are_enemies"), WarTimers = FindConVar("mp_warmuptime");
-	SetConVarInt(HideName, 2); SetConVarInt(LimitTeam, 30); SetConVarInt(EnemyKill, 1); SetConVarInt(WarTimers, 0);
+public void OnMapStart() {
+	Handle 	HideName  = FindConVar("mp_playerid"),
+			LimitTeam = FindConVar("mp_limitteams"),
+			EnemyKill = FindConVar("mp_teammates_are_enemies"),
+			WarTimers = FindConVar("mp_warmuptime");
+	SetConVarInt(HideName, 2);
+	SetConVarInt(LimitTeam, 30);
+	SetConVarInt(EnemyKill, 1);
+	SetConVarInt(WarTimers, 0);
 	LoadConfig_Models();
 	LoadConfig_Sound();
 	CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
@@ -360,174 +329,159 @@ public Action CheckAccessPlaying(Handle timer) {
 		return Plugin_Continue;
 	}
 }
-public Action ToggleFlashlight(iClient, const char[] CMD, Args) {
-	SetEntProp(iClient, Prop_Send, "m_fEffects", GetEntProp(iClient, Prop_Send, "m_fEffects") ^ 4);
+public Action ToggleFlashlight(client, const char[] CMD, Args) {
+	SetEntProp(client, Prop_Send, "m_fEffects", GetEntProp(client, Prop_Send, "m_fEffects") ^ 4);
 }
-public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
-{
-	int 	iClient = GetClientOfUserId(GetEventInt(event, "userid"));
-	int 	iAttacker = GetClientOfUserId(GetEventInt(event, "attacker"));
-	char 	Team[256],
-			TeamA[32];
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	GetClientCookie(iAttacker, TeamPlayer, TeamA, sizeof(TeamA));
-	SetEntProp(iClient, Prop_Data, "m_iFrags", 0);
-	SetEntProp(iClient, Prop_Data, "m_iDeaths", 0);
-	SetEntProp(iAttacker, Prop_Data, "m_iFrags", 0);
-	SetEntProp(iAttacker, Prop_Data, "m_iDeaths", 0);
-	if (StrEqual(Team, "team1"))
-	{
-		EmitSoundToAll(RoundSoundList[2],_,_,_,_,0.2);
-		CS_TerminateRound(5.0, CSRoundEnd_CTStoppedEscape, false);
-		CGOPrintToChatAll("%t", "noMurderWin")
-		Format(Team, sizeof(Team), "%t", "MurderBy");
-		CGOPrintToChatAll("%s %N", Team, iClient);
-		
-		return Plugin_Changed;
-	}
-	else
-	{
-		if (!StrEqual(TeamA, "team1"))
-		{
-			ForcePlayerSuicide(iAttacker);
-			CGOPrintToChat(iAttacker, "%t", "rdmKill");
-		} else {
-			if (bKnifeUse[iAttacker] == true)
-			{
-				Client_RemoveWeapon(iAttacker, "weapon_knife", false);
-				bKnifeUse[iAttacker]=false;
-				TimerGetKnife[iAttacker] = INVALID_HANDLE;
+public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
+
+	SetEntProp(client, Prop_Data, "m_iFrags", 0);
+	SetEntProp(client, Prop_Data, "m_iDeaths", 0);
+	SetEntProp(attacker, Prop_Data, "m_iFrags", 0);
+	SetEntProp(attacker, Prop_Data, "m_iDeaths", 0);
+	
+	static char buff[256];
+	
+	switch(role[client]) {
+		case Murder_Imposter: {
+			EmitSoundToAll(RoundSoundList[2],_,_,_,_,0.2);
+			CS_TerminateRound(5.0, CSRoundEnd_CTStoppedEscape, false);
+			CGOPrintToChatAll("%t", "noMurderWin")
+			Format(buff, sizeof buff, "%t", "MurderBy");
+			CGOPrintToChatAll("%s %N", buff, client);
+			
+			return Plugin_Changed;
+		}
+		default: {
+			switch(role[attacker]) {
+				case Murder_Officer: {
+					ForcePlayerSuicide(attacker);
+					CGOPrintToChat(attacker, "%t", "rdmKill");
+				}
+				default: {
+					if (bKnifeUse[attacker] == true) {
+						Client_RemoveWeapon(attacker, "weapon_knife", false);
+						bKnifeUse[attacker] = false;
+						TimerGetKnife[attacker] = INVALID_HANDLE;
+					}
+				}
 			}
 		}
-		
-		
 	}
 
 	int iAlive = 0;
 
-	for(int i = 1; i <= MaxClients; ++i)
-	{	
-		if (IsValidClient(i) && IsPlayerAlive(i))
-		{
+	for(int i = 1; i <= MaxClients; ++i) {	
+		if (IsValidClient(i) && IsPlayerAlive(i)) {
 			iAlive++;
 		}
 	}
 
-	if (iAlive <= 1)
-	{
+	if (iAlive <= 1) {
 		CS_TerminateRound(5.0, CSRoundEnd_CTStoppedEscape, false);
 		CGOPrintToChatAll("%t", "MurderWin");
 		EmitSoundToAll(RoundSoundList[1],_,_,_,_,0.2);
 	}
 
-	int iRagdoll = GetEntPropEnt(iClient, Prop_Send, "m_hRagdoll");
+	int iRagdoll = GetEntPropEnt(client, Prop_Send, "m_hRagdoll");
 	if (iRagdoll > 0)
 		AcceptEntityInput(iRagdoll, "Kill");
-	CreateDeathRagdoll(iClient);
+	CreateDeathRagdoll(client);
 	SetEventBroadcast(event, true);
 
 	return Plugin_Changed;
 }
 
-public Action ScoreOff(iClient, const char[] CMD, Args){return Plugin_Handled;}
-public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+public Action ScoreOff(int client, const char[] command, int args){
+	return Plugin_Handled;
+}
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
-	if (!IsValidClient(iClient)) return Plugin_Continue;
+	if (!IsValidClient(client)) return Plugin_Continue;
 
-	char 	Team[32];
-	GetClientCookie(iClient, TeamPlayer, Team, sizeof(Team));
-	if (StrEqual(Team, "team1"))
-	{
-		if (!g_InAttack2[iClient] && buttons & IN_ATTACK2)
-		{
-			if (bKnifeUse[iClient] == true)
+	switch(role[client]) {
+		case Murder_Imposter: {
+			if (!g_InAttack2[client] && buttons & IN_ATTACK2)
 			{
-				//char W[32];
-				//GetClientWeapon(iClient, W, sizeof(W));
-				Client_RemoveWeapon(iClient, "weapon_knife", false);
-				bKnifeUse[iClient]=false;
-				TimerGetKnife[iClient] = INVALID_HANDLE;
-			}
-			else
-			{	
-				if (TimerGetKnife[iClient] == null)
+				if (bKnifeUse[client] == true)
 				{
-					TimerGetKnife[iClient] 	= CreateTimer(2.0, GiveWeapon, iClient);
-					float flGameTime 		= GetGameTime();
-					SetEntData(iClient, m_iProgressBarDuration, 2, 4, true);
-					SetEntDataFloat(iClient, m_flProgressBarStartTime, flGameTime - (float(2) - 2.0), true);
-					SetEntDataFloat(iClient, m_flSimulationTime, flGameTime + 2.0, true);
-					SetEntData(iClient, m_iBlockingUseActionInProgress, 0, 4, true);
+					//char W[32];
+					//GetClientWeapon(client, W, sizeof(W));
+					Client_RemoveWeapon(client, "weapon_knife", false);
+					bKnifeUse[client]=false;
+					TimerGetKnife[client] = INVALID_HANDLE;
 				}
 				else
-				{
-					SetEntDataFloat(iClient, m_flProgressBarStartTime, 0.0, true);
-					SetEntData(iClient, m_iProgressBarDuration, 0, 1, true);
-					delete TimerGetKnife[iClient];
-				}
-			}
-			
-			g_InAttack2[iClient] 		= true;
-		}
-		else if(g_InAttack2[iClient] && !(buttons & IN_ATTACK2))
-		{
-			g_InAttack2[iClient] = false;
-		}
-	}
-
-	if (!g_InAttack1[iClient] && buttons & IN_ATTACK)
-		{
-			int aim = GetClientAimTarget(iClient, false);
-			if (aim > MaxClients)
-			{
-				char class[128];
-				GetEntityClassname(aim, class, sizeof(class));
-				if (StrEqual(class, "prop_ragdoll"))
-				{
-					SetEntProp(aim, Prop_Data, "m_CollisionGroup", 1);
-					CreateTimer(2.0, SetSolid, aim);
+				{	
+					if (TimerGetKnife[client] == null)
+					{
+						TimerGetKnife[client] 	= CreateTimer(2.0, GiveWeapon, client);
+						float flGameTime 		= GetGameTime();
+						SetEntData(client, m_iProgressBarDuration, 2, 4, true);
+						SetEntDataFloat(client, m_flProgressBarStartTime, flGameTime - (float(2) - 2.0), true);
+						SetEntDataFloat(client, m_flSimulationTime, flGameTime + 2.0, true);
+						SetEntData(client, m_iBlockingUseActionInProgress, 0, 4, true);
+					}
+					else
+					{
+						SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true);
+						SetEntData(client, m_iProgressBarDuration, 0, 1, true);
+						delete TimerGetKnife[client];
+					}
 				}
 				
-				g_InAttack1[iClient] 		= true;
+				g_InAttack2[client] 		= true;
 			}
-		}
-		else if(g_InAttack1[iClient] && !(buttons & IN_ATTACK))
-		{
-			g_InAttack1[iClient] = false;
-		}
-
-	if (!g_InReload[iClient] && buttons & IN_RELOAD)
-	{
-		if(IsPlayerAlive(iClient))
-		{
-			g_InReload[iClient] = true;
-
-			if (CDTimer_Voice[iClient] == null)
+			else if(g_InAttack2[client] && !(buttons & IN_ATTACK2))
 			{
-				Voice(iClient);
-				CDTimer_Voice[iClient] = CreateTimer(2.0, VoiceEnable, iClient);
+				g_InAttack2[client] = false;
 			}
 		}
 	}
-	else if(g_InReload[iClient] && !(buttons & IN_RELOAD))
-	{
-		g_InReload[iClient] = false;
+
+	if (!g_InAttack1[client] && buttons & IN_ATTACK) {
+		int aim = GetClientAimTarget(client, false);
+		if (aim > MaxClients)
+		{
+			char class[128];
+			GetEntityClassname(aim, class, sizeof(class));
+			if (StrEqual(class, "prop_ragdoll"))
+			{
+				SetEntProp(aim, Prop_Data, "m_CollisionGroup", 1);
+				CreateTimer(2.0, SetSolid, aim);
+			}
+			
+			g_InAttack1[client] 		= true;
+		}
+	} else if(g_InAttack1[client] && !(buttons & IN_ATTACK)) {
+		g_InAttack1[client] = false;
 	}
 
-	if(buttons & IN_SCORE && !(iOldButtons[iClient] & IN_SCORE))
-	{
-		StartMessageOne("ServerRankRevealAll", iClient, USERMSG_BLOCKHOOKS);
+	if (!g_InReload[client] && buttons & IN_RELOAD)	{
+		if(IsPlayerAlive(client)) {
+			g_InReload[client] = true;
+
+			if (CDTimer_Voice[client] == null) {
+				Voice(client);
+				CDTimer_Voice[client] = CreateTimer(2.0, VoiceEnable, client);
+			}
+		}
+	} else if(g_InReload[client] && !(buttons & IN_RELOAD)) {
+		g_InReload[client] = false;
+	}
+
+	if(buttons & IN_SCORE && !(iOldButtons[client] & IN_SCORE))	{
+		StartMessageOne("ServerRankRevealAll", client, USERMSG_BLOCKHOOKS);
 		EndMessage();
 	}
 
-	iOldButtons[iClient] = buttons;
+	iOldButtons[client] = buttons;
 
-	if (!g_InUse[iClient] && buttons & IN_USE)
-	{
-		g_InUse[iClient] = true;
-		int aim = GetClientAimTarget(iClient, false);
-		if (aim > MaxClients)
-		{
+	if (!g_InUse[client] && buttons & IN_USE) {
+		g_InUse[client] = true;
+		int aim = GetClientAimTarget(client, false);
+		if (aim > MaxClients) {
 			char class[128];
 			GetEntityClassname(aim, class, sizeof(class));
 			if (StrEqual(class, "prop_ragdoll", false))
@@ -535,69 +489,78 @@ public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[
 				int owner = GetClientOfUserId(GetEntProp(aim, Prop_Send, "m_hOwnerEntity"));
 				char Tr[64];
 				Format(Tr, sizeof(Tr), "%t ", "OwnerRandoll", owner);
-				if (owner <= 0) CGOPrintToChat(iClient, "%t", "OwnerRandollDIS"); else CGOPrintToChat(iClient, "%s %N", Tr, owner);
+				if (owner <= 0) CGOPrintToChat(client, "%t", "OwnerRandollDIS"); else CGOPrintToChat(client, "%s %N", Tr, owner);
 
-				if (Murder_GetClientRole(iClient) == Murder_Imposter && M_GetCountLoot(iClient)>=HideRagdoll_Price)
+				if (Murder_GetClientRole(client) == Murder_Imposter && M_GetCountLoot(client)>=HideRagdoll_Price)
 				{	
-					CGOPrintToChat(iClient, "{RED}Murder | {DEFAULT}Вы спрятали труп!");
+					CGOPrintToChat(client, "{RED}Murder | {DEFAULT}Вы спрятали труп!");
 					RemoveEntity(aim);
-					M_TakeLoot(iClient, HideRagdoll_Price);
+					M_TakeLoot(client, HideRagdoll_Price);
 				}
 				
 			}
 		}
-	}
-	else if(g_InUse[iClient] && !(buttons & IN_USE))
-	{
-		g_InUse[iClient] = false;
+	} else if(g_InUse[client] && !(buttons & IN_USE)) {
+		g_InUse[client] = false;
 	}
 
 	return Plugin_Continue;
 }
 
-public Action VoiceEnable(Handle timer, int iClient){
-	CDTimer_Voice[iClient] = null;
-	delete CDTimer_Voice[iClient];
+public Action VoiceEnable(Handle timer, int client){
+	CDTimer_Voice[client] = null;
+	delete CDTimer_Voice[client];
 }
-public Action GiveWeapon(Handle timer,int iClient){SetEntDataFloat(iClient, m_flProgressBarStartTime, 0.0, true); SetEntData(iClient, m_iProgressBarDuration, 0, 1, true); Client_GiveWeapon(iClient, "weapon_knife", true); bKnifeUse[iClient]=true;}
-public void CreateDeathRagdoll(iClient)
+public Action GiveWeapon(Handle timer,int client){SetEntDataFloat(client, m_flProgressBarStartTime, 0.0, true); SetEntData(client, m_iProgressBarDuration, 0, 1, true); Client_GiveWeapon(client, "weapon_knife", true); bKnifeUse[client]=true;}
+public void CreateDeathRagdoll(client)
 {
-	RagdollPlayer[iClient] = CreateEntityByName("prop_ragdoll");
-	if (RagdollPlayer[iClient] == -1)
+	RagdollPlayer[client] = CreateEntityByName("prop_ragdoll");
+	if (RagdollPlayer[client] == -1)
 		return;
 	
 	char sModel[PLATFORM_MAX_PATH];
-	GetClientModel(iClient, sModel, sizeof(sModel));
-	DispatchKeyValue(RagdollPlayer[iClient], "model", sModel);
-	DispatchSpawn(RagdollPlayer[iClient]);
-	ActivateEntity(RagdollPlayer[iClient]);
-	SetEntProp(RagdollPlayer[iClient], Prop_Send, "m_hOwnerEntity", GetClientUserId(iClient));
-	SetEntProp(RagdollPlayer[iClient], Prop_Data, "m_CollisionGroup", 1);
-	CreateTimer(2.0, SetSolid, RagdollPlayer[iClient]);
+	GetClientModel(client, sModel, sizeof(sModel));
+	DispatchKeyValue(RagdollPlayer[client], "model", sModel);
+	DispatchSpawn(RagdollPlayer[client]);
+	ActivateEntity(RagdollPlayer[client]);
+	SetEntProp(RagdollPlayer[client], Prop_Send, "m_hOwnerEntity", GetClientUserId(client));
+	SetEntProp(RagdollPlayer[client], Prop_Data, "m_CollisionGroup", 1);
+	CreateTimer(2.0, SetSolid, RagdollPlayer[client]);
 	float vec[3];
-	GetClientAbsOrigin(iClient, vec);
-	TeleportEntity(RagdollPlayer[iClient], vec, NULL_VECTOR, NULL_VECTOR);
+	GetClientAbsOrigin(client, vec);
+	TeleportEntity(RagdollPlayer[client], vec, NULL_VECTOR, NULL_VECTOR);
 }
 
 public Action SetSolid(Handle timer, int Entity){SetEntProp(Entity, Prop_Data, "m_CollisionGroup", 6);}
-public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
-{
+public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast) {
 	//CreateTimer(10.0, CheckAccessPlaying, _, TIMER_REPEAT);
-	int 	iRandom_Murder 	= GetRandomInt(1, GetClientCount()),
-		 	iRandom_Police 	= GetRandomInt(1, GetClientCount());
+	int clientCount = GetClientCount();
+	
+	int iRandom_Murder 	= GetRandomInt(1, clientCount),
+		iRandom_Police 	= GetRandomInt(1, clientCount);
 
 	int ent = -1; 
-	while ((ent = FindEntityByClassname(ent, "func_buyzone")) > 0){if (IsValidEntity(ent)){AcceptEntityInput(ent, "kill");}}
+	while ((ent = FindEntityByClassname(ent, "func_buyzone")) > 0) {
+		if (IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "kill");
+		}
+	}
 	ent = -1;
-	while ((ent = FindEntityByClassname(ent, "hostage_entity")) != -1){if (IsValidEntity(ent)){AcceptEntityInput(ent, "kill");}}
+	while ((ent = FindEntityByClassname(ent, "hostage_entity")) != -1) {
+		if (IsValidEntity(ent)) {
+			AcceptEntityInput(ent, "kill");
+		}
+	}
 
-	for(int i = 1; i <= GetClientCount(); ++i) if (IsValidClient(i)) Client_RemoveAllWeapons(i);
-	if (iRandom_Police == iRandom_Murder){iRandom_Police = GetRandomInt(0, GetClientCount());}
-
-	for(int i = 1; i <= MAXPLAYERS; ++i)
-	{
+	for(int i = 1; i <= clientCount; ++i)
 		if (IsValidClient(i))
-		{
+			Client_RemoveAllWeapons(i);
+	if (iRandom_Police == iRandom_Murder) {
+		iRandom_Police = GetRandomInt(0, clientCount);
+	}
+
+	for(int i = 1; i <= MAXPLAYERS; ++i) {
+		if (IsValidClient(i)) {
 			float Pos[3]; 
 			GetEntPropVector(i, Prop_Send, "m_vecOrigin", Pos);
 			EmitAmbientSound(RoundSoundList[0], Pos, i, 30, _, 1.0);
@@ -612,27 +575,17 @@ public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadca
 			CS_SetClientClanTag(i, "");
 			int iRandom_Models = GetRandomInt(0, sizeArray_Models - 1);
 			SetEntityModel(i, szModelList[iRandom_Models]);
-			int iMelee;
-			if (iRandom_Murder == i)
-			{
-				SetClientCookie(i, TeamPlayer, "team1");
-				iMelee = GivePlayerItem(i, "weapon_fists");
-				EquipPlayerWeapon(i, iMelee);
+			int iMelee = GivePlayerItem(i, "weapon_fists");
+			EquipPlayerWeapon(i, iMelee);
+			if (iRandom_Murder == i) {	
+				role[i] = Murder_Imposter;
 				CGOPrintToChat(i, "%t", "cMurder");
-			}
-			else if (iRandom_Police == i)
-			{
-				SetClientCookie(i, TeamPlayer, "team2");
-				iMelee = GivePlayerItem(i, "weapon_fists");
+			} else if (iRandom_Police == i) {
+				role[i] = Murder_Officer;
 				GivePlayerItem(i, "weapon_revolver");
-				EquipPlayerWeapon(i, iMelee);
 				CGOPrintToChat(i, "%t", "cPolice");
-			}
-			else
-			{
-				SetClientCookie(i, TeamPlayer, "team3");
-				iMelee = GivePlayerItem(i, "weapon_fists");
-				EquipPlayerWeapon(i, iMelee);
+			} else {
+				role[i] = Murder_Crewmate;
 				CGOPrintToChat(i, "%t", "cnoMurder");
 			}
 		}
@@ -641,31 +594,23 @@ public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadca
 public Action Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
 	for(int i = 1; i <= MaxClients; ++i) {
 		if (IsValidClient(i)) {
-			SetClientCookie(i, TeamPlayer, "team3");
+			role[i] = Murder_Crewmate;
 		}
 	}
 }
 public Action Event_PlayerShoot(Event event, char[] name, bool dontBroadcast) {
-	int iClient = GetClientOfUserId(GetEventInt(event, "userid"));
-	GetEntData(iClient, FindSendPropInfo("CCSPlayer", "m_iAmmo")+(1*4), 4);
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	GetEntData(client, FindSendPropInfo("CCSPlayer", "m_iAmmo")+(1*4), 4);
 }
 public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype) {
-	char 	sWeapon[32];
-	GetClientWeapon(inflictor, sWeapon, sizeof(sWeapon))
-	if(StrEqual(sWeapon, "weapon_knife"))
-	{
-		damage = 99999.0;
-	}
-
-	if(StrEqual(sWeapon, "weapon_revolver"))
-	{
-		damage = 99999.0;
-	}
-
-	if(StrEqual(sWeapon, "weapon_fists"))
-	{
+	static char weapon[32];
+	
+	GetClientWeapon(inflictor, weapon, sizeof weapon)
+	if(StrEqual(weapon, "weapon_fists")) {
 		damage = 0.0;
-	}
-
+	} else if(StrEqual(weapon, "weapon_knife") || StrEqual(weapon, "weapon_revolver")) {
+		damage = 99999.0;
+	} 
+	
 	return Plugin_Changed;
 }
